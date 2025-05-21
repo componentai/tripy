@@ -1,39 +1,43 @@
 import math
 import sys
 from collections import namedtuple
-from typing import List, Tuple, TypeVar, Generic
+from typing import List, Tuple, Union, NamedTuple, Sequence, TypeVar, cast
 import numpy as np
-from numpy.typing import NDArray
+import numpy.typing as npt
 
-Point = namedtuple("Point", ["x", "y"])
+
+class Point(NamedTuple):
+    x: float
+    y: float
+
 
 EPSILON = math.sqrt(sys.float_info.epsilon)
 
-T = TypeVar("T")
 
-
-def earclip(polygon: NDArray[np.float64]) -> NDArray[np.float64]:
+def earclip(
+    polygon: Sequence[Tuple[float, float]],
+) -> List[Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]]:
     """
     Simple earclipping algorithm for a given polygon p.
-    polygon is expected to be a numpy array of shape (n,2) containing the cartesian points of the polygon
+    polygon is expected to be an array of 2-tuples of the cartesian points of the polygon
 
     For a polygon with n points it will return n-2 triangles.
-    The triangles are returned as a numpy array of shape (n-2, 3, 2) where:
-    - n-2 is the number of triangles
-    - 3 represents the three points of each triangle
-    - 2 represents the x,y coordinates of each point
+    The triangles are returned as an array of 3-tuples where each item in the tuple is a 2-tuple of the cartesian point.
 
     e.g
-    >>> polygon = np.array([[0,1], [-1, 0], [0, -1], [1, 0]])
+    >>> polygon = [(0,1), (-1, 0), (0, -1), (1, 0)]
     >>> triangles = tripy.earclip(polygon)
-    >>> triangles.shape
-    (2, 3, 2)
-    """
-    ear_vertex: List[Point] = []
-    triangles_list: List[Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]] = []
+    >>> triangles
+    [((1, 0), (0, 1), (-1, 0)), ((1, 0), (-1, 0), (0, -1))]
 
-    # Convert numpy array to list of Points
-    polygon_points = [Point(float(x), float(y)) for x, y in polygon]
+    Implementation Reference:
+        - https://www.geometrictools.com/Documentation/TriangulationByEarClipping.pdf
+    """
+    ear_vertex = []
+    triangles = []
+
+    # Convert input tuples to Points
+    polygon_points = [Point(x, y) for x, y in polygon]
 
     if _is_clockwise(polygon_points):
         polygon_points.reverse()
@@ -59,7 +63,7 @@ def earclip(polygon: NDArray[np.float64]) -> NDArray[np.float64]:
 
         polygon_points.remove(ear)
         point_count -= 1
-        triangles_list.append(((prev_point.x, prev_point.y), (ear.x, ear.y), (next_point.x, next_point.y)))
+        triangles.append(((prev_point.x, prev_point.y), (ear.x, ear.y), (next_point.x, next_point.y)))
         if point_count > 3:
             prev_prev_point = polygon_points[prev_index - 1]
             next_next_index = (i + 1) % point_count
@@ -76,143 +80,7 @@ def earclip(polygon: NDArray[np.float64]) -> NDArray[np.float64]:
                         ear_vertex.append(p)
                 elif p in ear_vertex:
                     ear_vertex.remove(p)
-
-    # Convert list of tuples to numpy array of shape (n, 3, 2)
-    triangles_array = np.array(triangles_list)
-    return triangles_array
-
-
-def earclip_indices(polygon: NDArray[np.float64]) -> NDArray[np.int64]:
-    """
-    Simple earclipping algorithm for a given polygon p that returns indices instead of points.
-    polygon is expected to be a numpy array of shape (n,2) containing the cartesian points of the polygon
-
-    For a polygon with n points it will return n-2 triangles.
-    The triangles are returned as a numpy array of shape (n-2, 3) containing the indices of the points
-    in the original polygon that form each triangle.
-
-    e.g
-    >>> polygon = np.array([[0,1], [-1, 0], [0, -1], [1, 0]])
-    >>> triangles = tripy.earclip_indices(polygon)
-    >>> triangles.shape
-    (2, 3)
-    >>> triangles
-    array([[0, 1, 2],
-           [0, 2, 3]])
-    """
-    ear_vertex: List[Tuple[Point, int]] = []
-    triangles_list: List[Tuple[int, int, int]] = []
-
-    # Convert numpy array to list of Points with their indices
-    polygon_points = [(Point(float(x), float(y)), i) for i, (x, y) in enumerate(polygon)]
-    points, indices = zip(*polygon_points)
-
-    if _is_clockwise(points):
-        points = list(points)
-        indices = list(indices)
-        points.reverse()
-        indices.reverse()
-        polygon_points = list(zip(points, indices))
-
-    point_count = len(polygon_points)
-    for i in range(point_count):
-        prev_index = i - 1
-        prev_point, prev_idx = polygon_points[prev_index]
-        point, point_idx = polygon_points[i]
-        next_index = (i + 1) % point_count
-        next_point, next_idx = polygon_points[next_index]
-
-        if _is_ear(prev_point, point, next_point, [p for p, _ in polygon_points]):
-            ear_vertex.append((point, point_idx))
-
-    while ear_vertex and point_count >= 3:
-        ear, ear_idx = ear_vertex.pop(0)
-        i = next(idx for idx, (p, _) in enumerate(polygon_points) if p == ear)
-        prev_index = i - 1
-        prev_point, prev_idx = polygon_points[prev_index]
-        next_index = (i + 1) % point_count
-        next_point, next_idx = polygon_points[next_index]
-
-        polygon_points.remove((ear, ear_idx))
-        point_count -= 1
-        triangles_list.append((prev_idx, ear_idx, next_idx))
-        if point_count > 3:
-            prev_prev_point, prev_prev_idx = polygon_points[prev_index - 1]
-            next_next_index = (i + 1) % point_count
-            next_next_point, next_next_idx = polygon_points[next_next_index]
-
-            groups = [
-                (prev_prev_point, prev_point, next_point, [p for p, _ in polygon_points]),
-                (prev_point, next_point, next_next_point, [p for p, _ in polygon_points]),
-            ]
-            for group in groups:
-                p = group[1]
-                if _is_ear(*group):
-                    if not any(p == point for point, _ in ear_vertex):
-                        ear_vertex.append((p, next(idx for idx, (pt, _) in enumerate(polygon_points) if pt == p)))
-                else:
-                    ear_vertex = [(point, idx) for point, idx in ear_vertex if point != p]
-
-    # Convert list of tuples to numpy array of shape (n, 3)
-    triangles_array = np.array(triangles_list, dtype=np.int64)
-    return triangles_array
-
-
-def get_triangulation_points(polygon: NDArray[np.float64], triangles: NDArray[np.int64]) -> NDArray[np.float64]:
-    """
-    Convert triangle indices to actual points.
-
-    Args:
-        polygon: Input polygon points as numpy array of shape (n, 2)
-        triangles: Triangle indices as numpy array of shape (m, 3)
-
-    Returns:
-        numpy array of shape (m, 3, 2) containing the actual points for each triangle
-    """
-    return polygon[triangles]
-
-
-def calculate_total_area_points(triangles: NDArray[np.float64]) -> float:
-    """
-    Calculate the total area of all triangles.
-    triangles is expected to be a numpy array of shape (n, 3, 2) where:
-    - n is the number of triangles
-    - 3 represents the three points of each triangle
-    - 2 represents the x,y coordinates of each point
-    """
-    result: List[Tuple[float, float, float, float]] = []
-    for triangle in triangles:
-        sides: List[float] = []
-        for i in range(3):
-            next_index = (i + 1) % 3
-            pt = triangle[i]
-            pt2 = triangle[next_index]
-            # Distance between two points
-            side = math.sqrt(math.pow(pt2[0] - pt[0], 2) + math.pow(pt2[1] - pt[1], 2))
-            sides.append(side)
-        # Heron's numerically stable forumla for area of a triangle:
-        # https://en.wikipedia.org/wiki/Heron%27s_formula
-        # However, for line-like triangles of zero area this formula can produce an infinitesimally negative value
-        # as an input to sqrt() due to the cumulative arithmetic errors inherent to floating point calculations:
-        # https://people.eecs.berkeley.edu/~wkahan/Triangle.pdf
-        # For this purpose, abs() is used as a reasonable guard against this condition.
-        c, b, a = sorted(sides)
-        area = 0.25 * math.sqrt(abs((a + (b + c)) * (c - (a - b)) * (c + (a - b)) * (a + (b - c))))
-        result.append((area, a, b, c))
-    triangle_area = sum(tri[0] for tri in result)
-    return triangle_area
-
-
-def calculate_total_area_indices(polygon: NDArray[np.float64], triangles: NDArray[np.int64]) -> float:
-    """
-    Calculate the total area of all triangles using indices.
-
-    Args:
-        polygon: Input polygon points as numpy array of shape (n, 2)
-        triangles: Triangle indices as numpy array of shape (m, 3)
-    """
-    triangle_points = get_triangulation_points(polygon, triangles)
-    return calculate_total_area_points(triangle_points)
+    return triangles
 
 
 def _is_clockwise(polygon: List[Point]) -> bool:
@@ -262,3 +130,287 @@ def _triangle_area(x1: float, y1: float, x2: float, y2: float, x3: float, y3: fl
 
 def _triangle_sum(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float) -> float:
     return x1 * (y3 - y2) + x2 * (y1 - y3) + x3 * (y2 - y1)
+
+
+def calculate_total_area(
+    triangles: List[Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]],
+) -> float:
+    result = []
+    for triangle in triangles:
+        sides = []
+        for i in range(3):
+            next_index = (i + 1) % 3
+            pt = triangle[i]
+            pt2 = triangle[next_index]
+            # Distance between two points
+            side = math.sqrt(math.pow(pt2[0] - pt[0], 2) + math.pow(pt2[1] - pt[1], 2))
+            sides.append(side)
+        # Heron's numerically stable forumla for area of a triangle:
+        # https://en.wikipedia.org/wiki/Heron%27s_formula
+        # However, for line-like triangles of zero area this formula can produce an infinitesimally negative value
+        # as an input to sqrt() due to the cumulative arithmetic errors inherent to floating point calculations:
+        # https://people.eecs.berkeley.edu/~wkahan/Triangle.pdf
+        # For this purpose, abs() is used as a reasonable guard against this condition.
+        c, b, a = sorted(sides)
+        area = 0.25 * math.sqrt(abs((a + (b + c)) * (c - (a - b)) * (c + (a - b)) * (a + (b - c))))
+        result.append((area, a, b, c))
+    triangle_area = sum(tri[0] for tri in result)
+    return triangle_area
+
+
+def earclip_np(polygon: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """
+    NumPy version of the earclipping algorithm for a given polygon.
+    polygon is expected to be a numpy array of shape (n, 2) containing the cartesian points of the polygon
+
+    For a polygon with n points it will return n-2 triangles.
+    The triangles are returned as a numpy array of shape (n-2, 3, 2) where each item is a 2D point.
+
+    e.g
+    >>> polygon = np.array([[0,1], [-1, 0], [0, -1], [1, 0]])
+    >>> triangles = tripy.earclip_np(polygon)
+    >>> triangles.shape
+    (2, 3, 2)
+    """
+    ear_vertex = []
+    triangles = []
+
+    # Convert numpy array to list of Points
+    polygon_points = [Point(float(x), float(y)) for x, y in polygon]
+
+    if _is_clockwise(polygon_points):
+        polygon_points.reverse()
+
+    point_count = len(polygon_points)
+    for i in range(point_count):
+        prev_index = i - 1
+        prev_point = polygon_points[prev_index]
+        point = polygon_points[i]
+        next_index = (i + 1) % point_count
+        next_point = polygon_points[next_index]
+
+        if _is_ear(prev_point, point, next_point, polygon_points):
+            ear_vertex.append(point)
+
+    while ear_vertex and point_count >= 3:
+        ear = ear_vertex.pop(0)
+        i = polygon_points.index(ear)
+        prev_index = i - 1
+        prev_point = polygon_points[prev_index]
+        next_index = (i + 1) % point_count
+        next_point = polygon_points[next_index]
+
+        polygon_points.remove(ear)
+        point_count -= 1
+        triangles.append(((prev_point.x, prev_point.y), (ear.x, ear.y), (next_point.x, next_point.y)))
+        if point_count > 3:
+            prev_prev_point = polygon_points[prev_index - 1]
+            next_next_index = (i + 1) % point_count
+            next_next_point = polygon_points[next_next_index]
+
+            groups = [
+                (prev_prev_point, prev_point, next_point, polygon_points),
+                (prev_point, next_point, next_next_point, polygon_points),
+            ]
+            for group in groups:
+                p = group[1]
+                if _is_ear(*group):
+                    if p not in ear_vertex:
+                        ear_vertex.append(p)
+                elif p in ear_vertex:
+                    ear_vertex.remove(p)
+
+    # Convert the list of triangles to a numpy array
+    return np.array(triangles)
+
+
+def earclip_np_indices(polygon: npt.NDArray[np.float64]) -> npt.NDArray[np.int64]:
+    """
+    NumPy version of the earclipping algorithm that returns indices instead of coordinates.
+    polygon is expected to be a numpy array of shape (n, 2) containing the cartesian points of the polygon
+
+    For a polygon with n points it will return n-2 triangles.
+    The triangles are returned as a numpy array of shape (n-2, 3) containing the indices of the points
+    that form each triangle.
+
+    e.g
+    >>> polygon = np.array([[0,1], [-1, 0], [0, -1], [1, 0]])
+    >>> triangles = tripy.earclip_np_indices(polygon)
+    >>> triangles.shape
+    (2, 3)
+    >>> triangles
+    array([[0, 1, 2],
+           [0, 2, 3]])
+    """
+    ear_vertex = []
+    triangles = []
+    indices = list(range(len(polygon)))  # Keep track of original indices
+
+    # Convert numpy array to list of Points
+    polygon_points = [Point(float(x), float(y)) for x, y in polygon]
+
+    if _is_clockwise(polygon_points):
+        polygon_points.reverse()
+        indices.reverse()
+
+    point_count = len(polygon_points)
+    for i in range(point_count):
+        prev_index = i - 1
+        prev_point = polygon_points[prev_index]
+        point = polygon_points[i]
+        next_index = (i + 1) % point_count
+        next_point = polygon_points[next_index]
+
+        if _is_ear(prev_point, point, next_point, polygon_points):
+            ear_vertex.append(point)
+
+    while ear_vertex and point_count >= 3:
+        ear = ear_vertex.pop(0)
+        i = polygon_points.index(ear)
+        prev_index = i - 1
+        prev_point = polygon_points[prev_index]
+        next_index = (i + 1) % point_count
+        next_point = polygon_points[next_index]
+
+        # Store the indices of the triangle
+        triangles.append((indices[prev_index], indices[i], indices[next_index]))
+
+        polygon_points.remove(ear)
+        indices.pop(i)  # Remove the corresponding index
+        point_count -= 1
+
+        if point_count > 3:
+            prev_prev_point = polygon_points[prev_index - 1]
+            next_next_index = (i + 1) % point_count
+            next_next_point = polygon_points[next_next_index]
+
+            groups = [
+                (prev_prev_point, prev_point, next_point, polygon_points),
+                (prev_point, next_point, next_next_point, polygon_points),
+            ]
+            for group in groups:
+                p = group[1]
+                if _is_ear(*group):
+                    if p not in ear_vertex:
+                        ear_vertex.append(p)
+                elif p in ear_vertex:
+                    ear_vertex.remove(p)
+
+    return np.array(triangles, dtype=np.int64)
+
+
+def test_triangulation(polygon, name="Test case"):
+    """
+    Test all three triangulation functions on a given polygon and verify their outputs are equivalent.
+
+    Args:
+        polygon: Either a list of (x,y) tuples or a numpy array of shape (n,2)
+        name: Name of the test case for printing
+    """
+    import numpy as np
+
+    # Convert to numpy array if it's a list
+    if isinstance(polygon, list):
+        polygon_np = np.array(polygon)
+    else:
+        polygon_np = polygon
+
+    # Test all three functions
+    triangles = earclip(polygon)
+    triangles_np = earclip_np(polygon_np)
+    triangles_indices = earclip_np_indices(polygon_np)
+
+    # Convert all outputs to numpy arrays for comparison
+    triangles_np_from_list = np.array(triangles)
+    triangles_np_from_indices = polygon_np[triangles_indices]
+
+    # Function to compare triangles in an order-invariant way
+    def compare_triangles(tri1, tri2):
+        # Sort vertices of each triangle by x-coordinate, then y-coordinate
+        tri1_sorted = np.sort(tri1, axis=0)
+        tri2_sorted = np.sort(tri2, axis=0)
+        return np.allclose(tri1_sorted, tri2_sorted)
+
+    # Verify all outputs are equivalent
+    list_np_match = np.allclose(triangles_np_from_list, triangles_np)
+    list_indices_match = all(
+        compare_triangles(t1, t2) for t1, t2 in zip(triangles_np_from_list, triangles_np_from_indices)
+    )
+    np_indices_match = all(compare_triangles(t1, t2) for t1, t2 in zip(triangles_np, triangles_np_from_indices))
+
+    print(f"\n{name}:")
+    print(f"Number of points: {len(polygon_np)}")
+    print(f"Number of triangles: {len(triangles)}")
+    print(f"All methods produce equivalent results: {list_np_match and list_indices_match and np_indices_match}")
+
+    # print(f"polygon: {polygon_np}")
+    # print(f"Earclip: {triangles}")
+    # print(f"Earclip_np: {triangles_np}")
+    # print(f"Earclip_np_indices: {triangles_indices}")
+
+    return list_np_match and list_indices_match and np_indices_match
+
+
+def generate_random_polygon(n_points, radius=1.0, center=(0, 0)):
+    """
+    Generate a random simple polygon with n_points vertices.
+    The polygon will be approximately circular with points distributed around the center.
+
+    Args:
+        n_points: Number of points in the polygon
+        radius: Approximate radius of the polygon
+        center: Center point of the polygon
+
+    Returns:
+        numpy array of shape (n_points, 2) containing the polygon vertices
+    """
+    import numpy as np
+
+    # Generate random angles
+    angles = np.sort(np.random.uniform(0, 2 * np.pi, n_points))
+
+    # Add some random variation to the radius
+    radii = radius * (1 + 0.2 * np.random.randn(n_points))
+
+    # Convert to cartesian coordinates
+    x = center[0] + radii * np.cos(angles)
+    y = center[1] + radii * np.sin(angles)
+
+    return np.column_stack((x, y))
+
+
+if __name__ == "__main__":
+    import numpy as np
+
+    # Test case 1: Simple square
+    square = [(0, 1), (-1, 0), (0, -1), (1, 0)]
+    test_triangulation(square, "Square")
+
+    # Test case 2: Regular pentagon
+    pentagon = np.array([[0, 1], [-0.951, 0.309], [-0.588, -0.809], [0.588, -0.809], [0.951, 0.309]])
+    test_triangulation(pentagon, "Regular Pentagon")
+
+    # Test case 3: Random polygon with 10 points
+    random_poly_10 = generate_random_polygon(10)
+    test_triangulation(random_poly_10, "Random 10-point polygon")
+
+    # Test case 4: Random polygon with 20 points
+    random_poly_20 = generate_random_polygon(20)
+    test_triangulation(random_poly_20, "Random 20-point polygon")
+
+    # Test case 5: Random polygon with 50 points
+    random_poly_50 = generate_random_polygon(50)
+    test_triangulation(random_poly_50, "Random 50-point polygon")
+
+    # Test case 6: Star shape
+    star = np.array(
+        [
+            [0, 2],  # top
+            [1, 0],  # right
+            [2, 1],  # right middle
+            [0, -2],  # bottom
+            [-2, 1],  # left middle
+            [-1, 0],  # left
+        ]
+    )
+    test_triangulation(star, "Star shape")
