@@ -2,7 +2,6 @@ from setuptools import setup
 
 setup(
     name="tripy",
-    version="1.0.0",
     url="https://github.com/linuxlewis/tripy",
     author="Sam Bolgert",
     author_email="sbolgert@gmail.com",
