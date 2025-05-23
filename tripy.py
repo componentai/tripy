@@ -4,6 +4,7 @@ from collections import namedtuple
 from typing import List, Tuple, Union, NamedTuple, Sequence, TypeVar, cast
 import numpy as np
 import numpy.typing as npt
+import matplotlib.pyplot as plt
 
 
 class Point(NamedTuple):
@@ -224,7 +225,9 @@ def earclip_np(polygon: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
     return np.array(triangles)
 
 
-def earclip_np_indices(polygon: npt.NDArray[np.float64]) -> npt.NDArray[np.int64]:
+def earclip_np_indices(
+    polygon: npt.NDArray[np.float64], vertex_indices_map: npt.NDArray[np.int64] | None = None
+) -> npt.NDArray[np.int64]:
     """
     NumPy version of the earclipping algorithm that returns indices instead of coordinates.
     polygon is expected to be a numpy array of shape (n, 2) containing the cartesian points of the polygon
@@ -295,6 +298,11 @@ def earclip_np_indices(polygon: npt.NDArray[np.float64]) -> npt.NDArray[np.int64
                         ear_vertex.append(p)
                 elif p in ear_vertex:
                     ear_vertex.remove(p)
+
+    if vertex_indices_map is not None:
+        # Map each index in each triangle tuple to its corresponding vertex index
+        triangles = [(vertex_indices_map[i], vertex_indices_map[j], vertex_indices_map[k]) for i, j, k in triangles]
+        return np.array(triangles, dtype=np.int64)
 
     return np.array(triangles, dtype=np.int64)
 
@@ -377,40 +385,3 @@ def generate_random_polygon(n_points, radius=1.0, center=(0, 0)):
     y = center[1] + radii * np.sin(angles)
 
     return np.column_stack((x, y))
-
-
-if __name__ == "__main__":
-    import numpy as np
-
-    # Test case 1: Simple square
-    square = [(0, 1), (-1, 0), (0, -1), (1, 0)]
-    test_triangulation(square, "Square")
-
-    # Test case 2: Regular pentagon
-    pentagon = np.array([[0, 1], [-0.951, 0.309], [-0.588, -0.809], [0.588, -0.809], [0.951, 0.309]])
-    test_triangulation(pentagon, "Regular Pentagon")
-
-    # Test case 3: Random polygon with 10 points
-    random_poly_10 = generate_random_polygon(10)
-    test_triangulation(random_poly_10, "Random 10-point polygon")
-
-    # Test case 4: Random polygon with 20 points
-    random_poly_20 = generate_random_polygon(20)
-    test_triangulation(random_poly_20, "Random 20-point polygon")
-
-    # Test case 5: Random polygon with 50 points
-    random_poly_50 = generate_random_polygon(50)
-    test_triangulation(random_poly_50, "Random 50-point polygon")
-
-    # Test case 6: Star shape
-    star = np.array(
-        [
-            [0, 2],  # top
-            [1, 0],  # right
-            [2, 1],  # right middle
-            [0, -2],  # bottom
-            [-2, 1],  # left middle
-            [-1, 0],  # left
-        ]
-    )
-    test_triangulation(star, "Star shape")
